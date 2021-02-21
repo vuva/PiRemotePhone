@@ -1,10 +1,13 @@
+#!/usr/bin/env python3
 import serial
 import time
 import sys
 import argparse
-# import log
+import logging
+import re
 
 PORT='/dev/ttyUSB2'
+pat = re.compile('00[0123456789ABCDEF]{2}')
 
 class LTEModem(object):
 
@@ -18,7 +21,7 @@ class LTEModem(object):
 
 
     def sendCommand(self,command, getline=True):
-        self.ser.write(command)
+        self.ser.write(command.encode())
         data = ''
         if getline:
             data=self.readLine()
@@ -27,7 +30,7 @@ class LTEModem(object):
 
     def readLine(self):
         data = self.ser.readline()
-        print data
+        logging.debug(data)
         return data 
 
 
@@ -38,7 +41,7 @@ class LTEModem(object):
         command = 'AT+CMGL="ALL"\r\n'#gets all SMS in SIM card 
         self.sendCommand(command)
         data = self.ser.readall()
-        print data
+        return data
 
     def getUnreadSMS(self):
         self.ser.flushInput()
@@ -47,7 +50,7 @@ class LTEModem(object):
         command = 'AT+CMGL="REC UNREAD"\r\n'#gets incoming sms that has not been read
         self.sendCommand(command)
         data = self.ser.readall()
-        print data
+        return data
 
     def readSMS(self, sms_id):
         self.ser.flushInput()
@@ -55,15 +58,19 @@ class LTEModem(object):
         command='AT+CMGR='+ str(sms_id) + '\r\n'
         self.sendCommand(command)
         data = self.ser.readall()
-        print data
+        return data
 
     def sendMessage(self, recipient, content):
+        self.ser.flushInput()
+        self.ser.flushOutput()
         command = '''AT+CMGS="''' + recipient + '''"\r'''
         self.sendCommand(command)
         command = content + "\r"
         self.sendCommand(command)
         command = chr(26) 
         self.sendCommand(command)
+        response = self.ser.readall()
+        return response
         # self.ser.write('''AT+CMGS="''' + recipient + '''"\r''')
         # time.sleep(1)
         # self.ser.write(content + "\r")
@@ -71,9 +78,24 @@ class LTEModem(object):
         # self.ser.write(chr(26))
         # time.sleep(1)
 
+def decode_unicode(message):
+    """
+    Decodes a unicode encoded message
 
+    Raises a ValueError if the message can't be decoded
+    """
+    result = u''
+    for index in range(0, len(message), 4):
+        word = message[index:index+4]
+        match = pat.match(word)
+        if match is None:
+            raise ValueError('Message is not unicode')
+        result += unichr(int(word, 16))
+    return result
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
+
     parser = argparse.ArgumentParser(description='Query SMS from SIM card.')
     parser.add_argument('-a','--all', required=False, action="store_true", help='Get all messages in SIM card')
     parser.add_argument('-u','--unread', required=False, action="store_true", help='Get unread messages in SIM card')
@@ -83,13 +105,13 @@ if __name__ == '__main__':
     
     modem = LTEModem()
     if args.all:
-        modem.getAllSMS()
+       logging.info(modem.getAllSMS())
 
     if args.unread:
-        modem.getUnreadSMS()
+       logging.info(modem.getUnreadSMS())
     
     if args.id is not None:
-        modem.readSMS(args.id)
+       logging.info(modem.readSMS(args.id))
 
     if args.send is not None:
-        modem.sendMessage(args.send[0],args.send[1] )
+       logging.info(modem.sendMessage(args.send[0],args.send[1] ))
